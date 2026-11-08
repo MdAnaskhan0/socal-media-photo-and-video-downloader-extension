@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "Social Media Downloader",
+  "version": "2.0.0",
+  "description": "Adds a download button to photos and videos on Instagram, Facebook and X (Twitter).",
+  "permissions": ["downloads"],
+  "host_permissions": [
+    "https://www.instagram.com/*",
+    "https://*.cdninstagram.com/*",
+    "https://www.facebook.com/*",
+    "https://web.facebook.com/*",
+    "https://*.fbcdn.net/*",
+    "https://x.com/*",
+    "https://twitter.com/*",
+    "https://*.twimg.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.instagram.com/*"],
+      "js": ["common.js", "sites/instagram.js", "core.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://x.com/*", "https://twitter.com/*", "https://mobile.twitter.com/*"],
+      "js": ["common.js", "sites/twitter.js", "core.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.facebook.com/*", "https://web.facebook.com/*"],
+      "js": ["common.js", "sites/facebook.js", "core.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "social-downloader@example.local",
+      "strict_min_version": "121.0"
+    }
+  }
+}

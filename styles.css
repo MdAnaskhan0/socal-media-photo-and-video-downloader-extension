@@ -1,0 +1,53 @@
+#igdl-btn {
+  position: fixed;
+  z-index: 2147483647;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+#igdl-btn.show { opacity: 1; pointer-events: auto; }
+#igdl-btn:hover { background: rgba(0, 149, 246, 0.95); transform: scale(1.08); }
+#igdl-btn.busy { pointer-events: none; }
+#igdl-btn.busy svg { display: none; }
+#igdl-btn.busy::after {
+  content: "";
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: igdl-spin 0.7s linear infinite;
+}
+@keyframes igdl-spin { to { transform: rotate(360deg); } }
+
+#igdl-toast {
+  position: fixed;
+  z-index: 2147483647;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%) translateY(20px);
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: #262626;
+  color: #fff;
+  font: 600 14px/1.3 -apple-system, "Segoe UI", Roboto, sans-serif;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+#igdl-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+#igdl-toast.error { background: #c62828; }
