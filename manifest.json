@@ -1,9 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Social Media Downloader",
-  "version": "2.0.0",
+  "version": "4.0.0",
   "description": "Adds a download button to photos and videos on Instagram, Facebook and X (Twitter).",
-  "permissions": ["downloads"],
+  "permissions": [
+    "downloads"
+  ],
   "host_permissions": [
     "https://www.instagram.com/*",
     "https://*.cdninstagram.com/*",
@@ -16,26 +18,78 @@
   ],
   "background": {
     "service_worker": "background.js",
-    "scripts": ["background.js"]
+    "scripts": [
+      "background.js"
+    ]
   },
   "content_scripts": [
     {
-      "matches": ["https://www.instagram.com/*"],
-      "js": ["common.js", "sites/instagram.js", "core.js"],
-      "css": ["styles.css"],
+      "matches": [
+        "https://www.instagram.com/*"
+      ],
+      "js": [
+        "common.js",
+        "sites/instagram.js",
+        "core.js"
+      ],
+      "css": [
+        "styles.css"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://x.com/*", "https://twitter.com/*", "https://mobile.twitter.com/*"],
-      "js": ["common.js", "sites/twitter.js", "core.js"],
-      "css": ["styles.css"],
-      "run_at": "document_idle"
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*"
+      ],
+      "js": [
+        "hook-base.js",
+        "sites/twitter-hook.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
     },
     {
-      "matches": ["https://www.facebook.com/*", "https://web.facebook.com/*"],
-      "js": ["common.js", "sites/facebook.js", "core.js"],
-      "css": ["styles.css"],
-      "run_at": "document_idle"
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*"
+      ],
+      "js": [
+        "common.js",
+        "sites/twitter.js",
+        "core.js"
+      ],
+      "css": [
+        "styles.css"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://www.facebook.com/*",
+        "https://web.facebook.com/*"
+      ],
+      "js": [
+        "hook-base.js",
+        "sites/facebook-hook.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://www.facebook.com/*",
+        "https://web.facebook.com/*"
+      ],
+      "js": [
+        "common.js",
+        "sites/facebook.js",
+        "core.js"
+      ],
+      "css": [
+        "styles.css"
+      ],
+      "run_at": "document_start"
     }
   ],
   "icons": {
@@ -46,7 +100,7 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "social-downloader@example.local",
-      "strict_min_version": "121.0"
+      "strict_min_version": "128.0"
     }
   }
 }

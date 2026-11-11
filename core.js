@@ -2,6 +2,7 @@
 (() => {
   const A = globalThis.__dlAdapter;
   if (!A) return;
+  const dl = globalThis.__dl;
 
   const MIN_SIZE = 200; // ignore avatars / tiny thumbnails
 
@@ -11,6 +12,7 @@
   let rafId = 0;
   let lastX = 0, lastY = 0;
   let busy = false;
+  let recording = null;
 
   /* ---------- UI ---------- */
   function createUI() {
@@ -29,18 +31,20 @@
 
     toastEl = document.createElement("div");
     toastEl.id = "igdl-toast";
+    toastEl.addEventListener("click", () => { if (recording) recording.stop(); });
 
     document.documentElement.appendChild(btn);
     document.documentElement.appendChild(toastEl);
   }
 
   let toastTimer = 0;
-  function toast(text, isError = false) {
+  function toast(text, isError = false, sticky = false, action = false) {
     toastEl.textContent = text;
     toastEl.classList.toggle("error", isError);
+    toastEl.classList.toggle("action", action);
     toastEl.classList.add("show");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toastEl.classList.remove("show"), 2800);
+    if (!sticky) toastTimer = setTimeout(() => toastEl.classList.remove("show"), 3500);
   }
 
   /* ---------- Hover tracking ---------- */
@@ -53,6 +57,12 @@
       if (r.width < MIN_SIZE || r.height < MIN_SIZE) continue;
       if (el.tagName === "VIDEO") return el; // prefer video over poster images
       if (!img && (!A.acceptImage || A.acceptImage(el))) img = el;
+    }
+    // Videos with pointer-events:none are skipped by elementsFromPoint: check their boxes.
+    for (const v of document.querySelectorAll("video")) {
+      const r = v.getBoundingClientRect();
+      if (r.width >= MIN_SIZE && r.height >= MIN_SIZE &&
+          x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return v;
     }
     return img;
   }
@@ -102,26 +112,70 @@
     });
   }
 
+  function saveBlob(blob, name) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.documentElement.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  }
+
+  // Fallback: play the video and record it (works for any playable video).
+  async function runRecording(el, job) {
+    btn.classList.remove("busy");
+    btn.classList.add("recording");
+    const label = (p) => `Recording ${Math.round(p * 100)}% — don't pause. Click here to stop & save`;
+    toast(label(0), false, true, true);
+    recording = dl.recordVideo(el, { onProgress: (p) => toast(label(p), false, true, true) });
+    try {
+      const { blob, ext } = await recording.done;
+      const base = (job.filename || "video.mp4").replace(/\.\w+$/, "").replace(/[\\/]/g, "_");
+      saveBlob(blob, `${base}.${ext}`);
+      toast("Recording saved");
+    } finally {
+      recording = null;
+      btn.classList.remove("recording");
+    }
+  }
+
   async function onClick(e) {
     e.preventDefault();
     e.stopPropagation();
+    if (recording) { recording.stop(); return; }
     if (busy) return;
-    if (!currentMedia || !currentMedia.isConnected) {
+    const el = currentMedia;
+    if (!el || !el.isConnected) {
       toast("Move your mouse over the media and try again", true);
       return;
     }
     busy = true;
     btn.classList.add("busy");
     try {
-      const job = await A.resolve(currentMedia);
-      await send(job);
-      toast("Download started");
+      const job = await A.resolve(el);
+      if (job.record) {
+        console.warn("[Social Downloader] no direct link, recording instead");
+        await runRecording(el, job);
+        return;
+      }
+      try {
+        await send(job);
+        toast("Download started");
+      } catch (err) {
+        if (el.tagName === "VIDEO" && job.recordOnFail) {
+          console.warn("[Social Downloader] download failed (" + err.message + "), recording instead");
+          await runRecording(el, job);
+        } else {
+          throw err;
+        }
+      }
     } catch (err) {
       console.error("[Social Downloader]", err);
       toast("Failed: " + err.message, true);
     } finally {
       busy = false;
-      btn.classList.remove("busy");
+      btn.classList.remove("busy", "recording");
     }
   }
 

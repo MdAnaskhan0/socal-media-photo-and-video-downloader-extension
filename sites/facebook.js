@@ -1,76 +1,121 @@
 (() => {
-  const { clean, extFromUrl, register } = globalThis.__dl;
+  const { clean, directVideoUrl, onHookData, askHook, register } = globalThis.__dl;
+
+  const videos = new Map(); // id (or "u:url") -> { id, dur, hd, sd }
+  const photos = new Map(); // file name -> { url, width } (largest known version)
+  let waiters = [];
+
+  function addVideo(v) {
+    const key = v.id || "u:" + (v.hd || v.sd);
+    const cur = videos.get(key) || { id: v.id || null };
+    if (v.generic) { // guessed links never replace known ones
+      if (v.hd && !cur.hd) cur.hd = v.hd;
+      if (v.sd && !cur.sd) cur.sd = v.sd;
+    } else {
+      if (v.hd) cur.hd = v.hd;
+      if (v.sd) cur.sd = v.sd;
+    }
+    if (v.dur) cur.dur = v.dur;
+    videos.delete(key);
+    videos.set(key, cur); // keep "most recent last"
+    if (videos.size > 3000) videos.delete(videos.keys().next().value);
+  }
+
+  onHookData((type, data) => {
+    if (type === "fb-videos") data.forEach(addVideo);
+    else if (type === "fb-photos") {
+      for (const p of data) {
+        const cur = photos.get(p.base);
+        if (!cur || p.width > cur.width) photos.set(p.base, { url: p.url, width: p.width });
+      }
+    } else if (type === "rescan-done") {
+      const w = waiters;
+      waiters = [];
+      w.forEach((f) => f());
+    }
+  });
+
+  const rescan = () =>
+    new Promise((res) => {
+      waiters.push(res);
+      askHook("rescan");
+      setTimeout(res, 1500);
+    });
 
   const ID_PATTERNS = [/[?&]v=(\d+)/, /\/reel\/(\d+)/, /\/videos\/(?:[^/?]+\/)?(\d+)/];
   const LINK_SELECTOR = [
-    'a[href*="/videos/"]',
-    'a[href*="/reel/"]',
-    'a[href*="/watch"]',
-    'a[href*="/posts/"]',
-    'a[href*="/permalink.php"]',
-    'a[href*="story_fbid"]',
-    'a[href*="/share/v/"]',
-    'a[href*="/share/r/"]'
+    'a[href*="/videos/"]', 'a[href*="/reel/"]', 'a[href*="/watch"]', 'a[href*="/posts/"]',
+    'a[href*="/permalink.php"]', 'a[href*="story_fbid"]', 'a[href*="/share/v/"]', 'a[href*="/share/r/"]'
   ].join(",");
 
-  // Keys Facebook uses for progressive MP4 links (with audio), best quality first.
-  const URL_KEYS = ["browser_native_hd_url", "browser_native_sd_url", "playable_url_quality_hd", "playable_url"];
-
-  const videoIdFromHref = (href) => {
+  const idFromHref = (href) => {
     for (const p of ID_PATTERNS) {
       const m = href.match(p);
       if (m) return m[1];
     }
     return null;
   };
-
   const sameOrigin = (href) => {
     const u = new URL(href, location.href);
     return location.origin + u.pathname + u.search;
   };
 
-  // Figure out which video / post page this <video> belongs to.
   function findSource(el) {
-    let id = videoIdFromHref(location.href);
-    if (id) return { id, pageUrl: `${location.origin}/watch/?v=${id}` };
-
+    const ids = [];
+    let pageUrl = null;
+    const push = (id) => { if (id && !ids.includes(id)) ids.push(id); };
+    push(idFromHref(location.href));
     let node = el.parentElement;
     for (let i = 0; i < 30 && node; i++, node = node.parentElement) {
       const links = node.querySelectorAll(LINK_SELECTOR);
+      if (!links.length) continue;
       for (const a of links) {
-        id = videoIdFromHref(a.href);
-        if (id) return { id, pageUrl: `${location.origin}/watch/?v=${id}` };
+        const id = idFromHref(a.href);
+        push(id);
+        if (!id && !pageUrl) pageUrl = sameOrigin(a.href);
       }
-      if (links.length) return { id: null, pageUrl: sameOrigin(links[0].href) };
+      break;
+    }
+    if (!pageUrl && ids[0]) pageUrl = `${location.origin}/watch/?v=${ids[0]}`;
+    return { ids, pageUrl };
+  }
+
+  function pick(el, ids) {
+    for (const id of ids) {
+      const e = videos.get(id);
+      if (e && (e.hd || e.sd)) return e;
+    }
+    const d = el.duration;
+    if (isFinite(d) && d > 0) {
+      const all = [...videos.values()].reverse().filter((e) => e.dur && (e.hd || e.sd));
+      for (const tol of [1.5, 5]) { // exact-ish match first, then looser
+        const c = all.filter((e) => Math.abs(e.dur - d) <= tol)
+          .sort((a, b) => Math.abs(a.dur - d) - Math.abs(b.dur - d)); // ties keep "most recent first"
+        if (c.length) return c[0];
+      }
     }
     return null;
   }
 
-  function positionsOf(html, needle) {
-    const out = [];
-    let i = -1;
-    while (out.length < 30 && (i = html.indexOf(needle, i + 1)) !== -1) out.push(i);
-    return out;
-  }
+  /* ---- fallback: read the video page's HTML ---- */
+  const URL_KEYS = ["browser_native_hd_url", "browser_native_sd_url", "playable_url_quality_hd", "playable_url", "progressive_url"];
 
   function decode(raw) {
-    try {
-      return JSON.parse('"' + raw + '"');
-    } catch {
-      return raw.replace(/\\\//g, "/").replace(/\\u0025/g, "%").replace(/\\u0026/g, "&");
-    }
+    try { return JSON.parse('"' + raw + '"'); }
+    catch { return raw.replace(/\\\//g, "/").replace(/\\u0025/g, "%").replace(/\\u0026/g, "&"); }
   }
 
-  // Pull the MP4 link out of the page's embedded JSON.
-  function extractVideoUrl(html, id) {
-    const idPos = id ? positionsOf(html, id) : [];
+  function extractFromHtml(html, id) {
+    const idPos = [];
+    if (id) {
+      let i = -1;
+      while (idPos.length < 30 && (i = html.indexOf(id, i + 1)) !== -1) idPos.push(i);
+    }
     for (const key of URL_KEYS) {
       const re = new RegExp('"' + key + '":"((?:[^"\\\\]|\\\\.)*)"', "g");
-      let best = null;
-      let bestDist = Infinity;
-      let m;
+      let best = null, bestDist = Infinity, m;
       while ((m = re.exec(html))) {
-        if (!idPos.length) { best = m; break; } // no id: take the first match
+        if (!idPos.length) { best = m; break; }
         const dist = Math.min(...idPos.map((p) => Math.abs(p - m.index)));
         if (dist < bestDist) { bestDist = dist; best = m; }
       }
@@ -79,32 +124,56 @@
     return null;
   }
 
-  async function resolve(el) {
-    if (el.tagName === "IMG") {
-      const url = el.currentSrc || el.src;
-      if (!url || url.startsWith("blob:") || url.startsWith("data:")) throw new Error("Image URL not available");
-      const base = new URL(url).pathname.split("/").pop().replace(/\.\w+$/, "");
-      return { url, filename: `Facebook/facebook_photo_${clean(base)}.${extFromUrl(url, "jpg")}` };
+  async function resolveVideo(el) {
+    const { ids, pageUrl } = findSource(el);
+    const tag = ids[0] || Date.now();
+    const filename = `Facebook/facebook_video_${tag}.mp4`;
+
+    const direct = directVideoUrl(el);
+    if (direct) return { url: direct, filename, recordOnFail: true };
+
+    let entry = pick(el, ids);
+    if (!entry) {
+      await rescan(); // pick up data embedded in the page that just arrived
+      entry = pick(el, ids);
+    }
+    if (entry) {
+      const urls = [entry.hd, entry.sd].filter(Boolean);
+      return { urls, filename: `Facebook/facebook_video_${entry.id || tag}.mp4`, recordOnFail: true };
     }
 
-    const src = findSource(el);
-    if (!src) throw new Error("Could not identify this video");
-    const res = await fetch(src.pageUrl, { credentials: "include", headers: { accept: "text/html" } });
-    if (!res.ok) throw new Error(`Facebook returned ${res.status}`);
-    const html = await res.text();
-    const url = extractVideoUrl(html, src.id);
-    if (!url) throw new Error("Video link not found (private video, or Facebook changed its page format)");
-    return { url, filename: `Facebook/facebook_video_${src.id || Date.now()}.mp4` };
+    if (pageUrl) {
+      try {
+        const res = await fetch(pageUrl, { credentials: "include", headers: { accept: "text/html" } });
+        if (res.ok) {
+          const url = extractFromHtml(await res.text(), ids[0]);
+          if (url) return { url, filename, recordOnFail: true };
+        }
+      } catch (_) { /* fall through */ }
+    }
+
+    // Nothing found: record it as it plays.
+    return { record: true, filename };
+  }
+
+  function resolvePhoto(el) {
+    const src = el.currentSrc || el.src;
+    if (!src || src.startsWith("blob:") || src.startsWith("data:")) throw new Error("Image URL not available");
+    const base = new URL(src).pathname.split("/").pop();
+    const hit = photos.get(base);
+    const urls = [];
+    if (hit && hit.width >= (el.naturalWidth || 0)) urls.push(hit.url);
+    urls.push(src);
+    return { urls, filename: `Facebook/facebook_photo_${clean(base.replace(/\.\w+$/, ""))}.{ext}`, ext: "jpg" };
   }
 
   register({
     name: "Facebook",
-    // Only real photos: skips emoji, icons and other static assets.
     acceptImage: (img) => {
       const s = img.currentSrc || img.src || "";
       return /fbcdn\.net|fbsbx\.com/.test(s) && !/static\.xx\.fbcdn\.net|emoji|\/rsrc\.php/.test(s);
     },
     topOffset: () => 10,
-    resolve
+    resolve: (el) => (el.tagName === "IMG" ? resolvePhoto(el) : resolveVideo(el))
   });
 })();

@@ -51,3 +51,14 @@
 }
 #igdl-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 #igdl-toast.error { background: #c62828; }
+
+#igdl-btn.recording { background: #d32f2f; pointer-events: auto; }
+#igdl-btn.recording svg { display: none; }
+#igdl-btn.recording::after {
+  content: "";
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border-radius: 2px;
+}
+#igdl-toast.action { pointer-events: auto; cursor: pointer; }
